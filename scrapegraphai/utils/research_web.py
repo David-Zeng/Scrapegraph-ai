@@ -13,6 +13,7 @@ import requests
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field, validator
 from langchain_community.tools import DuckDuckGoSearchResults
+from ..models.ssl_configuration import ssl_config  # Import the SSL configuration module
 
 
 class ResearchWebError(Exception):
@@ -201,7 +202,17 @@ def search_on_web(
         results = []
         if config.search_engine == "duckduckgo":
             # Create a DuckDuckGo search object with max_results
-            research = DuckDuckGoSearchResults(max_results=config.max_results)
+            # Initialize DuckDuckGo search with SSL verification
+        research = DuckDuckGoSearchResults(
+            max_results=config.max_results,
+            backend="api",  # Use the API backend for better control
+            safesearch="Off",
+            timeout=config.timeout,
+            headers={"User-Agent": get_random_user_agent()}
+        )
+
+        # Monkey patch session to use custom SSL config
+        research._get_session().verify = ssl_config.ca_bundle_path
             # Run the search
             res = research.run(config.query)
             # Extract URLs using regex
@@ -246,19 +257,22 @@ def _search_bing(
 ) -> List[str]:
     """
     Helper function for Bing search with improved error handling.
-    
+
     Args:
         query (str): Search query
         max_results (int): Maximum number of results to return
         timeout (int): Request timeout in seconds
         proxy (str, optional): Proxy configuration
-        
+
     Returns:
         List[str]: List of URLs from search results
     """
     headers = {
         "User-Agent": get_random_user_agent()
     }
+
+    # Use the global SSL configuration for certificate verification
+    ssl_context = ssl_config.ssl_context
     
     params = {
         "q": query,
@@ -269,11 +283,12 @@ def _search_bing(
     
     try:
         response = requests.get(
-            "https://www.bing.com/search", 
-            params=params, 
-            headers=headers, 
-            proxies=proxies, 
-            timeout=timeout
+            "https://www.bing.com/search",
+            params=params,
+            headers=headers,
+            proxies=proxies,
+            timeout=timeout,
+            verify=ssl_config.ca_bundle_path  # Use custom CA bundle for verification
         )
         response.raise_for_status()
         
@@ -298,19 +313,22 @@ def _search_searxng(
 ) -> List[str]:
     """
     Helper function for SearXNG search.
-    
+
     Args:
         query (str): Search query
         max_results (int): Maximum number of results to return
         port (int): Port for SearXNG
         timeout (int): Request timeout in seconds
-        
+
     Returns:
         List[str]: List of URLs from search results
     """
     headers = {
         "User-Agent": get_random_user_agent()
     }
+
+    # Use the global SSL configuration for certificate verification
+    ssl_context = ssl_config.ssl_context
     
     params = {
         "q": query,
@@ -327,7 +345,8 @@ def _search_searxng(
             f"http://localhost:{port}/search",
             params=params,
             headers=headers,
-            timeout=timeout
+            timeout=timeout,
+            verify=ssl_config.ca_bundle_path  # Use custom CA bundle for verification
         )
         response.raise_for_status()
         
@@ -343,18 +362,21 @@ def _search_serper(
 ) -> List[str]:
     """
     Helper function for Serper search.
-    
+
     Args:
         query (str): Search query
         max_results (int): Maximum number of results to return
         api_key (str): API key for Serper
         timeout (int): Request timeout in seconds
-        
+
     Returns:
         List[str]: List of URLs from search results
     """
     if not api_key:
         raise SearchConfigError("Serper API key is required")
+
+    # Use the global SSL configuration for certificate verification
+    ssl_context = ssl_config.ssl_context
     
     headers = {
         "X-API-KEY": api_key,
@@ -371,7 +393,8 @@ def _search_serper(
             "https://google.serper.dev/search",
             json=data,
             headers=headers,
-            timeout=timeout
+            timeout=timeout,
+            verify=ssl_config.ca_bundle_path  # Use custom CA bundle for verification
         )
         response.raise_for_status()
         
